@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Create FaaS</title>
+
+<style>
+body {
+    font-family: Arial;
+    background-color: #eef5ff;
+    color: #002244;
+}
+
+.container {
+    width: 80%;
+    margin: auto;
+}
+
+.box {
+    background: #ffffff;
+    border: 1px solid #cccccc;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.form-group {
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+}
+
+label {
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+input, select, textarea {
+    padding: 8px;
+    font-size: 14px;
+}
+
+textarea {
+    font-family: monospace;
+}
+
+button {
+    background-color: #0055cc;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    cursor: pointer;
+    margin-top: 5px;
+}
+
+button:hover {
+    background-color: #003399;
+}
+
+button.red {
+    background-color: #cc0000;
+}
+
+ul {
+    margin-top: 10px;
+}
+</style>
+
+</head>
+<body>
+
+<div class="container">
+
+<h2>Create FaaS</h2>
+
+<!-- BASIC -->
+<div class="box">
+
+<div class="form-group">
+<label>Author</label>
+<input id="author">
+</div>
+
+<div class="form-group">
+<label>FaaS Name</label>
+<input id="faas_name">
+</div>
+
+<div class="form-group">
+<label>Version</label>
+<input id="faas_version" value="latest">
+</div>
+
+</div>
+
+<!-- SOURCE -->
+<div class="box">
+
+<div class="form-group">
+<label>Source Type</label>
+<select id="source_type" onchange="renderSource()">
+<option value=""></option>
+<option value="code">code</option>
+<option value="registry package">registry package</option>
+<option value="local package (zip)">local package (zip)</option>
+</select>
+</div>
+
+<div id="source_dynamic"></div>
+
+</div>
+
+<!-- TARGET -->
+<div class="box">
+
+<div class="form-group">
+<label>Target Registry</label>
+<select id="target_registry">
+<option>docker hub</option>
+<option>ghcr</option>
+</select>
+</div>
+
+<div class="form-group">
+<label>Package Name</label>
+<input id="pkg_name">
+</div>
+
+<div class="form-group">
+<label>Version</label>
+<input id="pkg_version" value="latest">
+</div>
+
+</div>
+
+<!-- FLAGS -->
+<div class="box">
+
+<div class="form-group">
+<label>External Customer</label>
+<input type="checkbox" id="ext" onchange="toggleExternal()">
+</div>
+
+<div id="tenancy_section"></div>
+
+<div class="form-group">
+<label>Internal Use</label>
+<input type="checkbox" id="int" onchange="toggleInternal()">
+</div>
+
+<div id="internal_section"></div>
+
+</div>
+
+<!-- ACTIONS -->
+<button onclick="submitForm()">SUBMIT</button>
+<button class="red" onclick="goHome()">HOME</button>
+
+<h3>Response</h3>
+<textarea id="response" rows="10"></textarea>
+
+</div>
+
+<script>
+const TENANTS_DB = [
+ {tenant:"bancaintesa", workspace:"ws1"},
+ {tenant:"poste", workspace:"ws3"},
+ {tenant:"poste", workspace:"ws4"}
+];
+
+const IAM_DB = ["marketing","operation","mobile core"];
+
+const CRD_DB = [
+ {kind:"TimMultiCloudCluster", short:"tmcc", status:["creating","created","ready","error"]},
+ {kind:"TimMultiCloudVirtualMachine", short:"tmcvm", status:["creating","created","ready","error"]}
+];
+
+let tenants = [];
+let departments = [];
+let events = [];
+let libraries = [];
+
+/* SOURCE RENDER */
+function renderSource(){
+ let type = document.getElementById("source_type").value;
+ let container = document.getElementById("source_dynamic");
+ container.innerHTML = "";
+
+ if(type === "code"){
+  container.innerHTML = `
+  <div class="box">
+
+    <div class="form-group">
+      <label>Code</label>
+      <textarea id="code" rows="10">def my_function(params):
+    # source instruction set
+    return result</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Runtime</label>
+      <select id="runtime">
+        <option>python2</option>
+        <option>python3</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Add Library</label>
+      <input id="lib_input">
+      <button onclick="addLibrary()">ADD</button>
+      <ul id="lib_list"></ul>
+    </div>
+
+  </div>
+  `;
+ }
+
+ if(type === "registry package"){
+  container.innerHTML = `
+    <div class="form-group">
+      <label>Registry Type</label>
+      <input id="reg_type">
+    </div>
+
+    <div class="form-group">
+      <label>Package</label>
+      <input id="reg_pkg">
+    </div>
+  `;
+ }
+
+ if(type === "local package (zip)"){
+  container.innerHTML = `
+    <div class="form-group">
+      <label>File Path</label>
+      <input id="file">
+    </div>
+  `;
+ }
+}
+
+/* LIBRARIES */
+function addLibrary(){
+ let input = document.getElementById("lib_input");
+ let value = input.value.trim();
+
+ if(value === "" || libraries.includes(value)) return;
+
+ libraries.push(value);
+ input.value = "";
+ renderLibraries();
+}
+
+function renderLibraries(){
+ let list = document.getElementById("lib_list");
+ list.innerHTML = libraries.map(l => `<li>${l}</li>`).join("");
+}
+
+/* TENANCY */
+function toggleExternal(){
+ let section = document.getElementById("tenancy_section");
+
+ if(!ext.checked){
+  section.innerHTML = "";
+  return;
+ }
+
+ updateTenancyUI();
+}
+
+function updateTenancyUI(){
+ let selected = tenants.map(t => t.tenant + "-" + t.workspace);
+
+ let tenantsList = [...new Set(TENANTS_DB.map(t => t.tenant))];
+
+ let html = `
+ <div class="form-group">
+   <label>Tenant</label>
+   <select id="tenant_select">
+     <option></option>
+     ${tenantsList.map(t => `<option>${t}</option>`).join("")}
+   </select>
+ </div>
+
+ <div class="form-group">
+   <label>Workspace</label>
+   <select id="workspace_select"></select>
+ </div>
+
+ <button onclick="addTenant()">ADD</button>
+
+ <ul>
+ ${tenants.map(t => `<li>${t.tenant} - ${t.workspace}</li>`).join("")}
+ </ul>
+ `;
+
+ document.getElementById("tenancy_section").innerHTML = html;
+
+ document.getElementById("tenant_select").onchange = function(){
+   let wsSelect = document.getElementById("workspace_select");
+   wsSelect.innerHTML = "";
+
+   TENANTS_DB.filter(t => t.tenant === this.value)
+     .forEach(t => {
+       if(!selected.includes(t.tenant + "-" + t.workspace)){
+         wsSelect.innerHTML += `<option>${t.workspace}</option>`;
+       }
+     });
+ };
+}
+
+function addTenant(){
+ let t = document.getElementById("tenant_select").value;
+ let w = document.getElementById("workspace_select").value;
+
+ if(!t || !w) return;
+
+ tenants.push({tenant:t, workspace:w});
+ updateTenancyUI();
+}
+
+/* INTERNAL */
+function toggleInternal(){
+ let section = document.getElementById("internal_section");
+
+ if(!int.checked){
+  section.innerHTML = "";
+  return;
+ }
+
+ updateInternalUI();
+}
+
+function updateInternalUI(){
+ let availableDepts = IAM_DB.filter(d => !departments.includes(d));
+
+ let html = `
+ <div class="form-group">
+   <label>Department</label>
+   <select id="dept_select">
+     ${availableDepts.map(d => `<option>${d}</option>`).join("")}
+   </select>
+ </div>
+
+ <button onclick="addDepartment()">ADD</button>
+
+ <ul>
+ ${departments.map(d => `<li>${d}</li>`).join("")}
+ </ul>
+
+ <hr>
+
+ <div class="form-group">
+   <label>CRD Kind</label>
+   <select id="crd_kind" onchange="updateEventFields()">
+     <option></option>
+     ${CRD_DB.map(c => `<option>${c.kind}</option>`).join("")}
+   </select>
+ </div>
+
+ <div class="form-group">
+   <label>Short</label>
+   <input id="crd_short" readonly>
+ </div>
+
+ <div class="form-group">
+   <label>Status</label>
+   <select id="crd_status"></select>
+ </div>
+
+ <div class="form-group">
+   <label>Event Name</label>
+   <input id="event_name">
+ </div>
+
+ <button onclick="addEvent()">ADD EVENT</button>
+
+ <ul>
+ ${events.map(e => `<li>${e.event}</li>`).join("")}
+ </ul>
+ `;
+
+ document.getElementById("internal_section").innerHTML = html;
+}
+
+function addDepartment(){
+ let d = document.getElementById("dept_select").value;
+ if(!d) return;
+
+ departments.push(d);
+ updateInternalUI();
+}
+
+function updateEventFields(){
+ let kind = document.getElementById("crd_kind").value;
+ let obj = CRD_DB.find(c => c.kind === kind);
+
+ document.getElementById("crd_short").value = obj.short;
+
+ let used = events.filter(e => e.kind === obj.short).map(e => e.status);
+
+ let statusSelect = document.getElementById("crd_status");
+ statusSelect.innerHTML = "";
+
+ obj.status.forEach(s => {
+   if(!used.includes(s)){
+     statusSelect.innerHTML += `<option>${s}</option>`;
+   }
+ });
+
+ statusSelect.onchange = function(){
+   document.getElementById("event_name").value =
+     `faas.${obj.short}.${this.value}.${faas_name.value}:${faas_version.value}`;
+ };
+}
+
+function addEvent(){
+ events.push({
+  kind: document.getElementById("crd_short").value,
+  status: document.getElementById("crd_status").value,
+  event: document.getElementById("event_name").value
+ });
+
+ updateInternalUI();
+}
+
+/* SUBMIT */
+function genToken(){
+ return Math.random().toString(36).substring(2);
+}
+
+function submitForm(){
+
+ let source = {"source-type": source_type.value};
+
+ if(source_type.value === "code"){
+   source["source-code"] = document.getElementById("code").value;
+   source["source-runtime-platform"] = document.getElementById("runtime").value;
+   source["required-libraries"] = libraries;
+ }
+
+ if(source_type.value === "registry package"){
+   source["source-registry-package-type"] = document.getElementById("reg_type").value;
+   source["source-registry-package"] = document.getElementById("reg_pkg").value;
+ }
+
+ if(source_type.value === "local package (zip)"){
+   source["source-file"] = document.getElementById("file").value;
+ }
+
+ source["target-registry"] = document.getElementById("target_registry").value;
+ source["target-registry-package-name"] = document.getElementById("pkg_name").value;
+ source["target-registry-package-version"] = document.getElementById("pkg_version").value;
+
+ let body = {
+  token: genToken(),
+  author: document.getElementById("author").value,
+  "faas-name": document.getElementById("faas_name").value,
+  "faas-source": source,
+  "flag-external-customer": ext.checked,
+  "flag-internal-use": int.checked,
+  "faas-tenancy": tenants.map(t => ({"tenant-name":t.tenant,"workspace-name":t.workspace})),
+  "faas-internal-user": departments,
+  "faas-events": events
+ };
+
+ fetch('/post-faas-creation-request', {
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body: JSON.stringify(body)
+ })
+ .then(r => r.json())
+ .then(d => document.getElementById("response").value = JSON.stringify(d,null,2));
+}
+
+function goHome(){
+ window.location = "/home.html";
+}
+</script>
+
+</body>
+</html>
