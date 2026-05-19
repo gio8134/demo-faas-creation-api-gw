@@ -190,9 +190,27 @@ function renderSource(){
 
     <div class="form-group">
       <label>Code</label>
-      <textarea id="code" rows="10">def my_function(params):
-    # source instruction set
-    return result</textarea>
+      <textarea id="code" rows="10">from kubernetes import client, config
+from datetime import datetime
+
+def customer_function(data: dict):
+    config.load_incluster_config()
+    v1 = client.CoreV1Api()
+    timestamp = datetime.now().strftime("%H-%M-%S")
+    cmap_name = f"demo-faas-result-cmap--{timestamp}"
+    cmap_data = {
+        str(k): str(v)
+        for k, v in data.items()
+    }
+    config_map = client.V1ConfigMap(
+        metadata=client.V1ObjectMeta(name=cmap_name),
+        data=cmap_data
+    )
+    v1.create_namespaced_config_map(
+        namespace=data.get("faas-namespace","default"),
+        body=config_map
+    )
+    return cmap_name</textarea>
     </div>
 
     <div class="form-group">
@@ -213,6 +231,7 @@ function renderSource(){
   </div>
   `;
  }
+
 
  if(type === "registry package"){
   container.innerHTML = `
